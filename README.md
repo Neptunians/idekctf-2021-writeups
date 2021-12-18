@@ -10,7 +10,7 @@ We also solved some pwn, rev, misc, forensics and crypto challenges and **got 8t
 
 ![Leaderboard](https://i.imgur.com/MraLxeH.png)
 
-I worked on 3 challenges that I'll write about here.
+I worked on 3 challenges that I'll write about here, from easier to harder.
 
 ## Difference Check
 
@@ -631,13 +631,17 @@ eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsInB1YmtleSI6Ii4uLy9hcHAvdXBsb2Fkcy9jRTZSRjNL
 idek{0bl1g4t0ry_jWt_Ch4LL3nGe}
 ```
 
-Flag for us!
+Flagged!
 
 ```
 idek{0bl1g4t0ry_jWt_Ch4LL3nGe}
 ```
 
 ## Fancy Notes
+
+![Fancy Notes](https://i.imgur.com/2zGhVxk.png)
+
+This was one of the nicest challenges in my not-that-long CTF plays.
 
 ### Challenge
 ### Hack
