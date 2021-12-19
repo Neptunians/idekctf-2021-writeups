@@ -177,9 +177,9 @@ idek{d1ff3r3nc3_ch3ck3r_d3ce1v3d_bY_d1ff3r3nc3s}
 
 ## Steghide as a Service
 
-### Challenge
-
 ![Steghide as a Service](https://i.imgur.com/MsyHftv.png)
+
+### Challenge
 
 In this challenge, we send a content (secret meassage), password and a JPEG image.
 
@@ -637,13 +637,103 @@ Flagged!
 idek{0bl1g4t0ry_jWt_Ch4LL3nGe}
 ```
 
+Complete exploit code: https://github.com/Neptunians/idekctf-2021-writeups/blob/main/steghide-as-a-service/exploit.py
+
 ## Fancy Notes
 
 ![Fancy Notes](https://i.imgur.com/2zGhVxk.png)
 
-This was one of the nicest challenges in my not-that-long CTF plays.
-
 ### Challenge
+
+This was one of the nicest challenges in my not-that-long CTF career.
+
+After adding the Note (Title and Content), there is a function to "Fancify" it.
+
+![Fancify Note](https://i.imgur.com/YGx79QF.png)
+
+And after clicking "search", it posts to the URL:
+
+```
+http://fancy-notes.chal.idek.team/fancy?q=Note+1&style=2
+```
+
+![Fancied Note](https://i.imgur.com/zKc96IG.png)
+
+There is also a Report feature, the classic send link to authenticated admin (bot).
+
+### Source Analysis
+
+The source code is bigger than Steghide as a Service, so let's go to the important parts.
+
+The complete source-code is available in my [repo](https://github.com/Neptunians/idekctf-2021-writeups/tree/main/fancy-notes).
+
+```python=9
+flag = open('flag.txt', 'r').read()
+
+def init_db():
+    con = sqlite3.connect('/tmp/database.db')
+    cur = con.cursor()
+    cur.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password TEXT NOT NULL)')
+    cur.execute('INSERT INTO USERS (username, password) VALUES ("admin", ?)', [ADMIN_PASS])
+    cur.execute('CREATE TABLE IF NOT EXISTS notes (title TEXT NOT NULL, content TEXT NOT NULL, owner TEXT NOT NULL)')
+    cur.execute('INSERT INTO notes (title, content, owner) VALUES ("flag", ?, 1)', [flag])
+    con.commit()
+    con.close()
+```
+* **Summary**
+    * Python/Flask App
+    * Flag is inside a Note, owned by Admin
+
+```python=44
+def find_note(query, user):
+    con = sqlite3.connect('/tmp/database.db')
+    cur = con.cursor()
+    cur.execute('SELECT title, content FROM notes WHERE owner = ? AND (INSTR(content, ?) OR INSTR(title,?))', [user, query, query])
+    rows = cur.fetchone()
+    return rows
+```
+* **Summary**
+    * It finds a note by part of the content
+
+
+```python=82
+@app.after_request
+def add_headers(response):
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+```
+* **Summary**
+    * Blocks caching
+    * It avoids cache probing attacks, which would be a possible solution here (see https://fireshellsecurity.team/uiuctf2021-yana/)
+
+
+```python=142
+@app.route('/fancy')
+def fancify():
+    if not session:
+        return redirect('/login')
+    if 'q' in request.args:
+        def filter(obj):
+            return any([len(v) > 1 and k != 'q' for k, v in request.args.items()])
+        if not filter(request.args):
+            results = find_note(request.args['q'], session['id'])
+            if results:
+                message = 'here is your 𝒻𝒶𝓃𝒸𝓎 note!'
+            else:
+                message = 'no notes found!'
+            return render_template('fancy.html', note=results, message=message)
+        return render_template('fancy.html', message='bad format! Your style params should not be so long!')
+    return render_template('fancy.html')
+```
+* **Summary**
+    * This block is key to the solution!!
+    * This is the route where you fancify the content
+    * The **q** parameter is the part of content that you search
+    * Any paramether other than **q** must have only 1 char
+    * If you passed all filters, render **fancy.html** Jinja template
+
+
+
 ### Hack
 
 ## References
@@ -651,6 +741,7 @@ This was one of the nicest challenges in my not-that-long CTF plays.
 * idekCTF: https://ctf.idek.team/
 * idekCTF Discord: https://discord.gg/Rrhdvzn
 * Repo with the artifacts discussed here: https://github.com/Neptunians/idekctf-2021-writeups
+* UIUCTF 2021 - yana - Client-side exfiltration (Cache Probing): https://fireshellsecurity.team/uiuctf2021-yana/
 * SSRF: https://portswigger.net/web-security/ssrf
 * ssrf-req-filter: https://github.com/y-mehta/ssrf-req-filter
 * Team: [FireShell](https://fireshellsecurity.team/)
